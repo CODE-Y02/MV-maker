@@ -32,7 +32,7 @@ export function Inspector() {
                 </Button>
             </div>
 
-            <ScrollArea className="flex-1 p-4">
+            <div className="flex-1 overflow-y-auto w-full p-4">
                 <div className="space-y-6">
                     <div className="space-y-2">
                         <Label>Layer Name</Label>
@@ -131,7 +131,7 @@ export function Inspector() {
                         </Button>
                     </div>
                 </div>
-            </ScrollArea>
+            </div>
         </div>
     );
 }

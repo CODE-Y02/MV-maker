@@ -1,53 +1,73 @@
+import { Howler } from 'howler';
+
 export async function exportVideo(
     canvas: HTMLCanvasElement,
-    audioBuffer: AudioBuffer,
+    duration: number,
     onProgress: (progress: number) => void
 ): Promise<Blob> {
-    return new Promise(async (resolve, reject) => {
-        const stream = canvas.captureStream(30); // 30 FPS
+    return new Promise((resolve, reject) => {
+        try {
+            const stream = canvas.captureStream(30); // 30 FPS
 
-        // Add audio track to the stream
-        const audioCtx = new AudioContext();
-        const source = audioCtx.createBufferSource();
-        source.buffer = audioBuffer;
-        const destination = audioCtx.createMediaStreamDestination();
-        source.connect(destination);
-
-        const combinedStream = new MediaStream([
-            ...stream.getVideoTracks(),
-            ...destination.stream.getAudioTracks()
-        ]);
-
-        const recorder = new MediaRecorder(combinedStream, {
-            mimeType: 'video/webm;codecs=vp9,opus',
-            videoBitsPerSecond: 5000000 // 5Mbps
-        });
-
-        const chunks: Blob[] = [];
-        recorder.ondataavailable = (e) => chunks.push(e.data);
-        recorder.onstop = () => {
-            const blob = new Blob(chunks, { type: 'video/webm' });
-            resolve(blob);
-        };
-
-        recorder.onerror = (e) => reject(e);
-
-        // Start recording and playback
-        recorder.start();
-        source.start();
-
-        const duration = audioBuffer.duration;
-        const interval = setInterval(() => {
-            const currentTime = audioCtx.currentTime;
-            const progress = Math.min((currentTime / duration) * 100, 100);
-            onProgress(progress);
-
-            if (currentTime >= duration) {
-                clearInterval(interval);
-                recorder.stop();
-                source.stop();
-                audioCtx.close();
+            // Add audio track from Howler instance
+            let audioStream: MediaStream | null = null;
+            if (Howler && Howler.ctx && (Howler as any).masterGain) {
+                const dest = Howler.ctx.createMediaStreamDestination();
+                (Howler as any).masterGain.connect(dest);
+                audioStream = dest.stream;
             }
-        }, 100);
+
+            const tracks = [
+                ...stream.getVideoTracks(),
+                ...(audioStream ? audioStream.getAudioTracks() : [])
+            ];
+
+            const combinedStream = new MediaStream(tracks);
+
+            let mimeType = '';
+            ['video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'].forEach(type => {
+                if (!mimeType && MediaRecorder.isTypeSupported(type)) {
+                    mimeType = type;
+                }
+            });
+
+            const options: MediaRecorderOptions = { videoBitsPerSecond: 5000000 };
+            if (mimeType) options.mimeType = mimeType;
+
+            const recorder = new MediaRecorder(combinedStream, options);
+
+            const chunks: Blob[] = [];
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) chunks.push(e.data);
+            };
+
+            recorder.onstop = () => {
+                const blob = new Blob(chunks, { type: mimeType || 'video/webm' });
+                resolve(blob);
+            };
+
+            recorder.onerror = (e) => reject(e);
+
+            // Start recording
+            recorder.start(100);
+
+            // Real-time capturing progress
+            let elapsedTime = 0;
+            const interval = setInterval(() => {
+                elapsedTime += 0.2;
+                const progress = Math.min((elapsedTime / duration) * 100, 100);
+                onProgress(progress);
+
+                if (elapsedTime >= duration) {
+                    clearInterval(interval);
+                    if (recorder.state !== 'inactive') {
+                        recorder.stop();
+                    }
+                }
+            }, 200);
+        } catch (e) {
+            console.error("Exporter internal error:", e);
+            reject(e);
+        }
     });
 }

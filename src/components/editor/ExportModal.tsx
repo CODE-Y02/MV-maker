@@ -6,24 +6,30 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Download, Loader2 } from 'lucide-react';
-import { exportVideo } from '@/lib/video-exporter';
+import { exportVideoOffline } from '@/lib/offline-renderer';
 
 export function ExportModal() {
-    const { export: exportState, audio } = useStore();
+    const { export: exportState, audio, layers, assets, subtitles } = useStore();
     const [localProgress, setLocalProgress] = React.useState(0);
     const [isProcessing, setIsProcessing] = React.useState(false);
 
     const handleExport = async () => {
-        const canvas = document.querySelector('canvas');
-        if (!canvas || !audio.buffer) return;
+        if (!audio.buffer || !audio.duration) return;
 
         setIsProcessing(true);
         setLocalProgress(0);
 
         try {
-            const blob = await exportVideo(canvas, audio.buffer, (p) => {
-                setLocalProgress(p);
-            });
+            const blob = await exportVideoOffline(
+                layers,
+                assets,
+                subtitles,
+                audio.buffer,
+                854,
+                480,
+                30,
+                (p) => setLocalProgress(p)
+            );
 
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');

@@ -160,6 +160,10 @@ export function Timeline() {
                         ? "bg-primary/90 text-primary-foreground border-primary"
                         : "bg-muted/90 text-foreground border-muted-foreground/30 hover:bg-muted"
                 )}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedLayerId(layer.id);
+                }}
                 style={{
                     left: `${Math.max(0, leftPercent)}%`,
                     width: `${Math.min(100 - leftPercent, widthPercent)}%`,
