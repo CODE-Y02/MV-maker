@@ -12,8 +12,49 @@ export function ExportModal() {
     const { export: exportState, audio, layers, assets, subtitles } = useStore();
     const [localProgress, setLocalProgress] = React.useState(0);
     const [isProcessing, setIsProcessing] = React.useState(false);
+    const [resolution, setResolution] = React.useState('480p');
     const [showConfirmCancel, setShowConfirmCancel] = React.useState(false);
     const abortControllerRef = React.useRef<AbortController | null>(null);
+
+    const resolutions = React.useMemo(() => {
+        interface ResolutionConfig {
+            width: number;
+            height: number;
+            label: string;
+            minMemory: number;
+            minCores: number;
+            isSupported?: boolean;
+            isRecommended?: boolean;
+        }
+
+        const res: Record<string, ResolutionConfig> = {
+            '480p': { width: 854, height: 480, label: '480p (Standard)', minMemory: 0, minCores: 0 },
+            '720p': { width: 1280, height: 720, label: '720p (HD)', minMemory: 4, minCores: 2 },
+            '1080p': { width: 1920, height: 1080, label: '1080p (Full HD)', minMemory: 8, minCores: 4 },
+            '4K': { width: 3840, height: 2160, label: '4K (Ultra HD)', minMemory: 16, minCores: 8 },
+        };
+
+        if (typeof window === 'undefined') return res;
+
+        const memory = (navigator as any).deviceMemory || 4;
+        const cores = navigator.hardwareConcurrency || 4;
+
+        return Object.entries(res).reduce((acc, [key, val]) => {
+            const isSupported = memory >= val.minMemory && cores >= val.minCores;
+            const isRecommended = (key === '720p' && memory >= 8) || (key === '480p' && memory < 8);
+
+            return {
+                ...acc,
+                [key]: { ...val, isSupported, isRecommended }
+            };
+        }, {} as Record<string, Required<ResolutionConfig>>);
+    }, []);
+
+    // Set default resolution based on recommendation
+    React.useEffect(() => {
+        const recommended = Object.entries(resolutions).find(([_, v]) => v.isRecommended);
+        if (recommended) setResolution(recommended[0]);
+    }, [resolutions]);
 
     const handleExport = async () => {
         if (!audio.buffer || !audio.duration) return;
@@ -23,13 +64,14 @@ export function ExportModal() {
         abortControllerRef.current = new AbortController();
 
         try {
+            const { width, height } = resolutions[resolution as keyof typeof resolutions];
             const blob = await exportVideoOffline(
                 layers,
                 assets,
                 subtitles,
                 audio.buffer,
-                854,
-                480,
+                width,
+                height,
                 30,
                 (p) => setLocalProgress(p),
                 abortControllerRef.current.signal
@@ -98,10 +140,37 @@ export function ExportModal() {
                             </p>
                         </div>
                     ) : (
-                        <div className="flex flex-col items-center justify-center p-8 bg-muted/20 rounded-lg border border-dashed">
-                            <Download className="w-12 h-12 text-muted-foreground mb-4" />
-                            <p className="text-sm font-medium">Ready to export</p>
-                            <p className="text-xs text-muted-foreground mt-1">Resolution: 854x480 (480p)</p>
+                        <div className="space-y-4">
+                            <div className="flex flex-col items-center justify-center p-8 bg-muted/20 rounded-lg border border-dashed">
+                                <Download className="w-12 h-12 text-muted-foreground mb-4" />
+                                <p className="text-sm font-medium">Ready to export</p>
+                                <p className="text-xs text-muted-foreground mt-1">Resolution: {resolutions[resolution as keyof typeof resolutions].width}x{resolutions[resolution as keyof typeof resolutions].height}</p>
+                            </div>
+
+                            <div className="space-y-2 px-1">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-xs font-medium">Video Quality</span>
+                                    <select
+                                        className="h-8 text-xs bg-background border rounded px-2"
+                                        value={resolution}
+                                        onChange={(e) => setResolution(e.target.value)}
+                                    >
+                                        {Object.entries(resolutions).map(([key, val]) => (
+                                            <option key={key} value={key} disabled={!val.isSupported}>
+                                                {val.label} {!val.isSupported ? '(Unsupported on this device)' : (val.isRecommended ? '★ Recommended' : '')}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                {!resolutions[resolution as keyof typeof resolutions]?.isSupported && (
+                                    <p className="text-[10px] text-destructive font-medium">
+                                        Warning: This resolution exceeds your hardware's recommended limits. Rendering may crash.
+                                    </p>
+                                )}
+                                <p className="text-[10px] text-muted-foreground">
+                                    Recommended based on your {((navigator as any).deviceMemory || 'detectable')}GB RAM and {(navigator.hardwareConcurrency || 'detectable')} cores.
+                                </p>
+                            </div>
                         </div>
                     )}
                 </div>
