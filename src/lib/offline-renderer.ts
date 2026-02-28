@@ -141,8 +141,10 @@ export async function exportVideoOffline(
     width: number,
     height: number,
     fps: number,
-    onProgress: (p: number) => void
+    onProgress: (p: number) => void,
+    signal?: AbortSignal
 ): Promise<Blob> {
+    if (signal?.aborted) throw new Error("Export cancelled");
     const duration = audioBuffer.duration;
     const totalFrames = Math.floor(duration * fps);
     const step = 1 / fps;
@@ -162,6 +164,8 @@ export async function exportVideoOffline(
         });
     });
     await Promise.all(imagePromises);
+
+    if (signal?.aborted) throw new Error("Export cancelled");
 
     // 2. Initialize WebM Muxer
     const muxer = new Muxer({
@@ -208,6 +212,9 @@ export async function exportVideoOffline(
         audioEncoder.encode(audioData);
         audioData.close();
     }
+
+    if (signal?.aborted) throw new Error("Export cancelled");
+
     await audioEncoder.flush();
 
     // 4. Set up Offline Audio Renderer for Canvas FFT
@@ -237,8 +244,13 @@ export async function exportVideoOffline(
     frame0.close();
 
     // Promisify the offline render timeline using scheduled suspends
-    await new Promise<void>((resolveRender) => {
+    await new Promise<void>((resolveRender, rejectRender) => {
         const scheduleNext = () => {
+            if (signal?.aborted) {
+                rejectRender(new Error("Export cancelled"));
+                return;
+            }
+
             currentFrame++;
             if (currentFrame >= totalFrames) {
                 // Let audio processing cleanly hit max edge and end
@@ -267,7 +279,9 @@ export async function exportVideoOffline(
                 scheduleNext();
                 offlineCtx.resume();
             }).catch(e => {
-                console.error("Context timeline interrupted:", e);
+                if (!signal?.aborted) {
+                    console.error("Context timeline interrupted:", e);
+                }
                 resolveRender();
             });
         };

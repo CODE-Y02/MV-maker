@@ -12,12 +12,15 @@ export function ExportModal() {
     const { export: exportState, audio, layers, assets, subtitles } = useStore();
     const [localProgress, setLocalProgress] = React.useState(0);
     const [isProcessing, setIsProcessing] = React.useState(false);
+    const [showConfirmCancel, setShowConfirmCancel] = React.useState(false);
+    const abortControllerRef = React.useRef<AbortController | null>(null);
 
     const handleExport = async () => {
         if (!audio.buffer || !audio.duration) return;
 
         setIsProcessing(true);
         setLocalProgress(0);
+        abortControllerRef.current = new AbortController();
 
         try {
             const blob = await exportVideoOffline(
@@ -28,8 +31,11 @@ export function ExportModal() {
                 854,
                 480,
                 30,
-                (p) => setLocalProgress(p)
+                (p) => setLocalProgress(p),
+                abortControllerRef.current.signal
             );
+
+            if (abortControllerRef.current.signal.aborted) return;
 
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -37,16 +43,40 @@ export function ExportModal() {
             a.download = `music-maker-video-${Date.now()}.webm`;
             a.click();
             URL.revokeObjectURL(url);
-        } catch (err) {
-            console.error('Export failed:', err);
+        } catch (err: any) {
+            if (err.message === "Export cancelled") {
+                console.log("Export was cancelled by user");
+            } else {
+                console.error('Export failed:', err);
+            }
         } finally {
             setIsProcessing(false);
+            abortControllerRef.current = null;
+            exportState.setIsExporting(false);
+        }
+    };
+
+    const handleCancel = () => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+        }
+        setShowConfirmCancel(false);
+        exportState.setIsExporting(false);
+    };
+
+    const attemptCancel = () => {
+        if (isProcessing) {
+            setShowConfirmCancel(true);
+        } else {
             exportState.setIsExporting(false);
         }
     };
 
     return (
-        <Dialog open={exportState.isExporting} onOpenChange={exportState.setIsExporting}>
+        <Dialog open={exportState.isExporting} onOpenChange={(open) => {
+            if (!open) attemptCancel();
+            else exportState.setIsExporting(true);
+        }}>
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                     <DialogTitle>Export Video</DialogTitle>
@@ -64,7 +94,7 @@ export function ExportModal() {
                             </div>
                             <Progress value={localProgress} className="h-2" />
                             <p className="text-[10px] text-muted-foreground text-center">
-                                Please keep this tab focused for best results.
+                                Processing offline. Closing this window will cancel the export.
                             </p>
                         </div>
                     ) : (
@@ -77,7 +107,7 @@ export function ExportModal() {
                 </div>
 
                 <DialogFooter>
-                    <Button variant="outline" onClick={() => exportState.setIsExporting(false)} disabled={isProcessing}>
+                    <Button variant="outline" onClick={attemptCancel}>
                         Cancel
                     </Button>
                     <Button onClick={handleExport} disabled={isProcessing || !audio.buffer}>
@@ -92,6 +122,26 @@ export function ExportModal() {
                     </Button>
                 </DialogFooter>
             </DialogContent>
+
+            {/* Confirmation Dialog */}
+            <Dialog open={showConfirmCancel} onOpenChange={setShowConfirmCancel}>
+                <DialogContent className="sm:max-w-[300px] z-[100]">
+                    <DialogHeader>
+                        <DialogTitle>Cancel Export?</DialogTitle>
+                        <DialogDescription>
+                            Your progress will be lost. Are you sure?
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="flex-row gap-2 sm:justify-center">
+                        <Button variant="outline" onClick={() => setShowConfirmCancel(false)} className="flex-1">
+                            No
+                        </Button>
+                        <Button variant="destructive" onClick={handleCancel} className="flex-1">
+                            Yes, Cancel
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </Dialog>
     );
 }
