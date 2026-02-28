@@ -1,4 +1,4 @@
-import { Muxer, ArrayBufferTarget } from 'webm-muxer';
+import { Muxer, ArrayBufferTarget, StreamTarget } from 'webm-muxer';
 import { Layer, ImageLayer, VisualizerLayer, TextLayer, LyricsLayer, ProjectAsset } from '@/types';
 import { drawBars, drawCircular, drawWaveform, drawBass } from './visualizers/templates';
 
@@ -142,8 +142,9 @@ export async function exportVideoOffline(
     height: number,
     fps: number,
     onProgress: (p: number) => void,
-    signal?: AbortSignal
-): Promise<Blob> {
+    signal?: AbortSignal,
+    fileHandle?: FileSystemFileHandle | null
+): Promise<Blob | null> {
     if (signal?.aborted) throw new Error("Export cancelled");
     const duration = audioBuffer.duration;
     const totalFrames = Math.floor(duration * fps);
@@ -168,8 +169,22 @@ export async function exportVideoOffline(
     if (signal?.aborted) throw new Error("Export cancelled");
 
     // 2. Initialize WebM Muxer
+    let writableStream: FileSystemWritableFileStream | null = null;
+    let muxerTarget;
+
+    if (fileHandle) {
+        writableStream = await fileHandle.createWritable();
+        muxerTarget = new StreamTarget({
+            onData: (data, offset) => {
+                writableStream!.write({ type: 'write', data: data as BufferSource, position: offset });
+            }
+        });
+    } else {
+        muxerTarget = new ArrayBufferTarget();
+    }
+
     const muxer = new Muxer({
-        target: new ArrayBufferTarget(),
+        target: muxerTarget,
         video: { codec: 'V_VP9', width, height, frameRate: fps },
         audio: { codec: 'A_OPUS', sampleRate: audioBuffer.sampleRate, numberOfChannels: audioBuffer.numberOfChannels },
         firstTimestampBehavior: 'offset'
@@ -292,5 +307,11 @@ export async function exportVideoOffline(
 
     await videoEncoder.flush();
     muxer.finalize();
-    return new Blob([muxer.target.buffer], { type: 'video/webm' });
+
+    if (writableStream) {
+        await writableStream.close();
+        return null; // File is already saved to disk
+    }
+
+    return new Blob([(muxer.target as ArrayBufferTarget).buffer], { type: 'video/webm' });
 }

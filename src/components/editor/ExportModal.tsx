@@ -31,17 +31,18 @@ export function ExportModal() {
             '480p': { width: 854, height: 480, label: '480p (Standard)', minMemory: 0, minCores: 0 },
             '720p': { width: 1280, height: 720, label: '720p (HD)', minMemory: 4, minCores: 2 },
             '1080p': { width: 1920, height: 1080, label: '1080p (Full HD)', minMemory: 8, minCores: 4 },
-            '4K': { width: 3840, height: 2160, label: '4K (Ultra HD)', minMemory: 16, minCores: 8 },
+            '4K': { width: 3840, height: 2160, label: '4K (Ultra HD)', minMemory: 8, minCores: 4 },
         };
 
         if (typeof window === 'undefined') return res;
 
-        const memory = (navigator as any).deviceMemory || 4;
+        // Browsers often cap deviceMemory at 8 for privacy
+        const memory = (navigator as any).deviceMemory || 8;
         const cores = navigator.hardwareConcurrency || 4;
 
         return Object.entries(res).reduce((acc, [key, val]) => {
             const isSupported = memory >= val.minMemory && cores >= val.minCores;
-            const isRecommended = (key === '720p' && memory >= 8) || (key === '480p' && memory < 8);
+            const isRecommended = (key === '1080p' && memory >= 8) || (key === '720p' && memory < 8 && memory >= 4) || (key === '480p' && memory < 4);
 
             return {
                 ...acc,
@@ -65,6 +66,23 @@ export function ExportModal() {
 
         try {
             const { width, height } = resolutions[resolution as keyof typeof resolutions];
+
+            // Ask user for save location for high resolutions or by default
+            let fileHandle: FileSystemFileHandle | null = null;
+            try {
+                if (window.showSaveFilePicker) {
+                    fileHandle = await window.showSaveFilePicker({
+                        suggestedName: `music-maker-video-${Date.now()}.webm`,
+                        types: [{
+                            description: 'Video File',
+                            accept: { 'video/webm': ['.webm'] },
+                        }],
+                    });
+                }
+            } catch (pE) {
+                console.log("User cancelled file picker or browser unsupported, falling back to RAM");
+            }
+
             const blob = await exportVideoOffline(
                 layers,
                 assets,
@@ -74,17 +92,21 @@ export function ExportModal() {
                 height,
                 30,
                 (p) => setLocalProgress(p),
-                abortControllerRef.current.signal
+                abortControllerRef.current.signal,
+                fileHandle
             );
 
             if (abortControllerRef.current.signal.aborted) return;
 
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `music-maker-video-${Date.now()}.webm`;
-            a.click();
-            URL.revokeObjectURL(url);
+            // If we didn't use stream to disk, do the legacy download
+            if (blob) {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `music-maker-video-${Date.now()}.webm`;
+                a.click();
+                URL.revokeObjectURL(url);
+            }
         } catch (err: any) {
             if (err.message === "Export cancelled") {
                 console.log("Export was cancelled by user");
@@ -156,8 +178,8 @@ export function ExportModal() {
                                         onChange={(e) => setResolution(e.target.value)}
                                     >
                                         {Object.entries(resolutions).map(([key, val]) => (
-                                            <option key={key} value={key} disabled={!val.isSupported}>
-                                                {val.label} {!val.isSupported ? '(Unsupported on this device)' : (val.isRecommended ? '★ Recommended' : '')}
+                                            <option key={key} value={key}>
+                                                {val.label} {!val.isSupported ? '(Low Perf Warning)' : (val.isRecommended ? '★ Recommended' : '')}
                                             </option>
                                         ))}
                                     </select>
